@@ -1,36 +1,56 @@
 FROM ubuntu:24.04
 
+# ---------- base env ----------
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     PYENV_ROOT=/opt/pyenv \
     PATH=/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/bin:/usr/bin:/bin \
     UV_LINK_MODE=copy
 
+# Use bash -lc so pyenv/shims are available within RUN steps
+SHELL ["/bin/bash", "-lc"]
+
+# ---------- system deps ----------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl ca-certificates gnupg \
     xvfb libxkbcommon-x11-0 libsm6 libxext6 libgl1 libegl1 \
     libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
     libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
     libffi-dev liblzma-dev uuid-dev \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
+# ---------- pyenv + Pythons (default 3.12) ----------
 RUN git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
-
 ENV PYTHON_BUILD_OPTS="--verbose"
 RUN eval "$(pyenv init -)" \
-    && pyenv install 3.9.18 \
-    && pyenv install 3.10.13 \
-    && pyenv install 3.11.9 \
-    && pyenv install 3.12.5 \
-    && pyenv install 3.13.0 \
-    && pyenv global 3.12.5
+ && pyenv install 3.9.18 \
+ && pyenv install 3.10.13 \
+ && pyenv install 3.11.9 \
+ && pyenv install 3.12.5 \
+ && pyenv install 3.13.0 \
+ && pyenv global 3.12.5
 
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --install-dir /usr/local/bin
+# ---------- uv ----------
+ENV UV_INSTALL_DIR=/usr/local/bin
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# ---------- prebuilt venv (3.12) from requirements.txt ----------
+# Copy only requirements to keep the image generic; no monorepo editables
+COPY requirements.txt /tmp/requirements.txt
+
+# Create a persistent venv and pre-install third-party deps into it
+RUN python -m venv /opt/venvs/py312 \
+ && source /opt/venvs/py312/bin/activate \
+ && python -m pip install --upgrade pip \
+ && uv pip install -r /tmp/requirements.txt \
+ && rm -f /tmp/requirements.txt
+
+# Make that venv the default runtime Python
+ENV VIRTUAL_ENV=/opt/venvs/py312
+ENV PATH=$VIRTUAL_ENV/bin:$PATH
+ENV UV_PYTHON=3.12
+
+# ---------- non-root user ----------
 RUN useradd -m -u 1000 -s /bin/bash runner
 USER runner
 WORKDIR /home/runner
-
-ENV UV_CACHE_DIR=/home/runner/.cache/uv \
-    PIP_CACHE_DIR=/home/runner/.cache/pip \
-    UV_PYTHON=3.12
