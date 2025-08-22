@@ -7,9 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/bin:/usr/bin:/bin \
     UV_LINK_MODE=copy
 
-# Use bash -lc so pyenv/shims are available within RUN steps
-SHELL ["/bin/bash", "-lc"]
-
 # ---------- system deps ----------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl ca-certificates gnupg \
@@ -17,10 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
     libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
     libffi-dev liblzma-dev uuid-dev \
+    passwd \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------- pyenv + Pythons (default 3.12) ----------
 RUN git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
+
+# only here we need bash -lc so pyenv env vars expand
+SHELL ["/bin/bash", "-lc"]
 ENV PYTHON_BUILD_OPTS="--verbose"
 RUN eval "$(pyenv init -)" \
  && pyenv install 3.9.18 \
@@ -30,22 +31,21 @@ RUN eval "$(pyenv init -)" \
  && pyenv install 3.13.0 \
  && pyenv global 3.12.5
 
-# ---------- uv ----------
+# revert shell to default (so useradd etc works)
+SHELL ["/bin/sh", "-c"]
+
+# ---------- uv (correct install) ----------
 ENV UV_INSTALL_DIR=/usr/local/bin
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # ---------- prebuilt venv (3.12) from requirements.txt ----------
-# Copy only requirements to keep the image generic; no monorepo editables
 COPY requirements.txt /tmp/requirements.txt
-
-# Create a persistent venv and pre-install third-party deps into it
 RUN python -m venv /opt/venvs/py312 \
- && source /opt/venvs/py312/bin/activate \
+ && . /opt/venvs/py312/bin/activate \
  && python -m pip install --upgrade pip \
  && uv pip install -r /tmp/requirements.txt \
  && rm -f /tmp/requirements.txt
 
-# Make that venv the default runtime Python
 ENV VIRTUAL_ENV=/opt/venvs/py312
 ENV PATH=$VIRTUAL_ENV/bin:$PATH
 ENV UV_PYTHON=3.12
