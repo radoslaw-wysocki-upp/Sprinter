@@ -1,67 +1,77 @@
 FROM ubuntu:24.04
 
-# ---------- base env ----------
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     PYENV_ROOT=/opt/pyenv \
     PATH=/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     UV_LINK_MODE=copy
 
-# ---------- system deps ----------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl ca-certificates gnupg \
     xvfb libxkbcommon-x11-0 libsm6 libxext6 libgl1 libegl1 \
     libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
     libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
     libffi-dev liblzma-dev uuid-dev passwd \
+    nodejs npm \
  && rm -rf /var/lib/apt/lists/*
 
-# ---------- ensure non-root 'ubuntu' user exists ----------
 RUN if id -u ubuntu >/dev/null 2>&1; then \
       echo "User 'ubuntu' already exists"; \
     else \
       useradd -m -s /bin/bash ubuntu; \
     fi
 
-
-# ---------- add NodeJS runtime for GitHub Actions ----------
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
- && rm -rf /var/lib/apt/lists/*
-
-
-# ---------- pyenv + Pythons (default 3.12) ----------
 RUN git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
 
-# Only this block needs bash -lc so pyenv init works
 SHELL ["/bin/bash", "-lc"]
 ENV PYTHON_BUILD_OPTS="--verbose"
+# Adjust versions as needed; we’ll build venvs for each of these
+ENV PY_VERS="3.11.13 3.12.5"
+
 RUN eval "$(pyenv init -)" \
- && pyenv install 3.9.18 \
- && pyenv install 3.10.13 \
- && pyenv install 3.11.9 \
- && pyenv install 3.12.5 \
- && pyenv install 3.13.0 \
+ && for v in $PY_VERS; do pyenv install -s "$v"; done \
  && pyenv global 3.12.5
 
 SHELL ["/bin/sh", "-c"]
 
-# ---------- uv installation ----------
 ENV UV_INSTALL_DIR=/usr/local/bin
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# ---------- prebuilt venv (3.12) from requirements.txt ----------
 COPY requirements.txt /tmp/requirements.txt
-RUN python -m venv /opt/venvs/py312 \
- && . /opt/venvs/py312/bin/activate \
- && python -m pip install --upgrade pip \
- && uv pip install -r /tmp/requirements.txt \
- && rm -f /tmp/requirements.txt
 
-# Default to that venv for all subsequent runs
-ENV VIRTUAL_ENV=/opt/venvs/py312
-ENV PATH=$VIRTUAL_ENV/bin:$PATH
+# Create a venv for each Python, preinstall deps once
+SHELL ["/bin/bash", "-lc"]
+RUN set -euo pipefail; \
+    mkdir -p /opt/venvs; \
+    for v in $PY_VERS; do \
+      majmin="${v%.*}"; \
+      pybin="$(pyenv root)/versions/${v}/bin/python"; \
+      "$pybin" -m venv "/opt/venvs/py${majmin#*.}${majmin##*.}"; \
+      . "/opt/venvs/py${majmin#*.}${majmin##*.}/bin/activate"; \
+      python -m pip install --upgrade pip; \
+      uv pip install -r /tmp/requirements.txt; \
+    done; \
+    rm -f /tmp/requirements.txt
+
+# Runtime selector: choose venv by PY_VERSION or UV_PYTHON; default 3.12
+RUN cat > /usr/local/bin/activate-venv <<'SH' \
+ && chmod +x /usr/local/bin/activate-venv
+#!/bin/sh
+ver="${PY_VERSION:-${UV_PYTHON:-3.12}}"
+case "$ver" in
+  3.11*) vdir="/opt/venvs/py311" ;;
+  3.12*) vdir="/opt/venvs/py312" ;;
+  *) vdir="/opt/venvs/py312" ;;
+esac
+if [ -d "$vdir" ]; then
+  export VIRTUAL_ENV="$vdir"
+  export PATH="$VIRTUAL_ENV/bin:$PATH"
+fi
+exec "$@"
+SH
+
 ENV UV_PYTHON=3.12
+ENTRYPOINT ["/usr/local/bin/activate-venv"]
 
-# ---------- run as 'ubuntu' user ----------
 USER ubuntu
 WORKDIR /home/ubuntu
