@@ -53,6 +53,9 @@ RUN set -euo pipefail; \
     done; \
     rm -f /tmp/requirements.txt
 
+# ✅ Give the runtime user ownership of all venvs
+RUN chown -R ubuntu:ubuntu /opt/venvs
+
 # Runtime selector: choose venv by PY_VERSION or UV_PYTHON; default 3.12
 RUN cat > /usr/local/bin/activate-venv <<'SH' \
  && chmod +x /usr/local/bin/activate-venv
