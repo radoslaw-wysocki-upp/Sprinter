@@ -4,7 +4,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     PYENV_ROOT=/opt/pyenv \
-    PATH=/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/bin:/usr/bin:/bin \
+    PATH=/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     UV_LINK_MODE=copy
 
 # ---------- system deps ----------
