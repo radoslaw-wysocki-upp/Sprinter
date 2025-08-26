@@ -45,9 +45,9 @@ SHELL ["/bin/bash", "-lc"]
 RUN set -euo pipefail; \
     for v in $PY_VERS; do \
       majmin="${v%.*}"; \
-      suffix="${majmin//./}"            # 3.11 -> 311, 3.12 -> 312
+      suffix="${majmin//./}" \
       pybin="$(pyenv root)/versions/${v}/bin/python"; \
-      vdir="/opt/venvs/py${suffix}";    # /opt/venvs/py311 or /opt/venvs/py312
+      vdir="/opt/venvs/py${suffix}"; \
       "$pybin" -m venv "$vdir"; \
       . "$vdir/bin/activate"; \
       python -m pip install --upgrade pip; \
