@@ -4,7 +4,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     PYENV_ROOT=/opt/pyenv \
     PATH=/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_INSTALL_DIR=/usr/local/bin \
+    UV_PYTHON=3.11
+
+ARG PY_VERS="3.11.13 3.12.5"
+ARG GLOBAL_PY="3.11.13"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl ca-certificates gnupg \
@@ -15,29 +20,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs npm \
  && rm -rf /var/lib/apt/lists/*
 
-RUN if id -u ubuntu >/dev/null 2>&1; then \
-      echo "User 'ubuntu' already exists"; \
-    else \
-      useradd -m -s /bin/bash ubuntu; \
-    fi
+RUN if id -u ubuntu >/dev/null 2>&1; then echo ok; else useradd -m -s /bin/bash ubuntu; fi
 
 RUN git clone https://github.com/pyenv/pyenv.git "$PYENV_ROOT"
 
 SHELL ["/bin/bash", "-lc"]
 ENV PYTHON_BUILD_OPTS="--verbose"
-ENV PY_VERS="3.11.13 3.12.5"
 RUN eval "$(pyenv init -)" \
  && for v in $PY_VERS; do pyenv install -s "$v"; done \
- && pyenv global 3.12.5
+ && pyenv global "$GLOBAL_PY"
 
 SHELL ["/bin/sh", "-c"]
-
-ENV UV_INSTALL_DIR=/usr/local/bin
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 COPY requirements.txt /tmp/requirements.txt
 
-# Create /opt/venvs owned by ubuntu, then build EACH venv AS ubuntu
 RUN install -d -m 0775 -o ubuntu -g ubuntu /opt/venvs
 
 USER ubuntu
@@ -45,38 +42,35 @@ SHELL ["/bin/bash", "-lc"]
 RUN set -euo pipefail; \
     for v in $PY_VERS; do \
       majmin="${v%.*}"; \
-      suffix="${majmin//./}" \
+      suffix="${majmin//./}"; \
       pybin="$(pyenv root)/versions/${v}/bin/python"; \
       vdir="/opt/venvs/py${suffix}"; \
       "$pybin" -m venv "$vdir"; \
       . "$vdir/bin/activate"; \
       python -m pip install --upgrade pip; \
       uv pip install -r /tmp/requirements.txt; \
-      uv pip install -U ruff bandit coverage; \
+      uv pip install -U ruff bandit coverage pydoclint pre-commit; \
     done
 
-
-# clean up
 USER root
 SHELL ["/bin/sh", "-c"]
 RUN rm -f /tmp/requirements.txt
 
-# Runtime selector: choose venv by PY_VERSION or UV_PYTHON; default 3.12
 RUN cat > /usr/local/bin/activate-venv <<'SH' \
  && chmod +x /usr/local/bin/activate-venv
 #!/bin/sh
-ver="${PY_VERSION:-${UV_PYTHON:-3.12}}"
+ver="${PY_VERSION:-${UV_PYTHON:-3.11}}"
 case "$ver" in
-  3.11*) vdir="/opt/venvs/py311" ;;
-  3.12*) vdir="/opt/venvs/py312" ;;
-  *) vdir="/opt/venvs/py312" ;;
+  3.11*|311) vdir="/opt/venvs/py311" ;;
+  3.12*|312) vdir="/opt/venvs/py312" ;;
+  *) vdir="/opt/venvs/py311" ;;
 esac
 [ -d "$vdir" ] && export VIRTUAL_ENV="$vdir" && export PATH="$VIRTUAL_ENV/bin:$PATH"
 exec "$@"
 SH
 
-ENV UV_PYTHON=3.12
-ENTRYPOINT ["/usr/local/bin/activate-venv"]
 
 USER ubuntu
 WORKDIR /home/ubuntu
+
+CMD ["/bin/bash"]
